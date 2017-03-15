@@ -40,3 +40,12 @@ result,_ = respgo.DecodeToString([]byte(respBulkStringText))
 
 result == respBulkString
 ```
+### respgo.Parse
+Support timeout setting for Parse.
+```go
+conn, err := l.Accept()
+msgtype, result, err := respgo.Parse(conn, time.Minute)
+if msgtype==respgo.TypeSimpleStrings{
+    ///do something
+}
+```
