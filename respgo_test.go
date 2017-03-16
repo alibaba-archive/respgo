@@ -208,6 +208,8 @@ func TestParse(t *testing.T) {
 		conn.Write([]byte("xxxxxxxxxxx"))
 		time.Sleep(10 * time.Millisecond)
 		conn.Write([]byte(respErrorArrayText))
+		time.Sleep(10 * time.Millisecond)
+		conn.Write([]byte(respErrorArrayText))
 
 	}()
 
@@ -288,6 +290,13 @@ func TestParse(t *testing.T) {
 	if assert.NotNil(err) {
 		assert.Contains(err.Error(), "invalid syntax")
 	}
+
+	_, result, err = respgo.Parse(conn, time.Duration(0))
+	arr, _ = result.([]interface{})
+	assert.Equal(0, len(arr))
+	if assert.NotNil(err) {
+		assert.Contains(err.Error(), "i/o timeout")
+	}
 }
 func TestParseConcurrent(t *testing.T) {
 	assert := assert.New(t)
@@ -302,6 +311,9 @@ func TestParseConcurrent(t *testing.T) {
 		conn.Write([]byte(respIntegerText))
 		conn.Write([]byte(respBulkStringText))
 		conn.Write([]byte(respArrayComplexText))
+
+		conn.Write([]byte("$6\r\nfo"))
+		conn.Write([]byte("obar\r\n"))
 	}()
 
 	l, err := net.Listen("tcp", ":3000")
@@ -350,6 +362,48 @@ func TestParseConcurrent(t *testing.T) {
 				assert.Equal("Bar", arr2[1].(string))
 			}
 
+		}
+	}
+}
+func TestPartPacket(t *testing.T) {
+	assert := assert.New(t)
+
+	go func() {
+		conn, err := net.Dial("tcp", ":3000")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+
+		conn.Write([]byte("$6\r\nfo"))
+		conn.Write([]byte("obar\r\n"))
+		conn.Write([]byte("$66\r\n012345678901234567890123456789012345678901234567890123456789"))
+		conn.Write([]byte("obara\r\n"))
+
+	}()
+
+	l, err := net.Listen("tcp", ":3000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	conn, err := l.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	for index := 0; index < 2; index++ {
+		msgtype, result, _ := respgo.Parse(conn, time.Minute)
+		switch msgtype {
+		case respgo.TypeBulkStrings:
+			str := result.(string)
+			assert.Nil(err)
+			if len(str) > 10 {
+				assert.Equal("012345678901234567890123456789012345678901234567890123456789obara", result.(string))
+			} else {
+				assert.Equal(respBulkString, result.(string))
+			}
 		}
 	}
 }

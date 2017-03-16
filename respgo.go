@@ -211,7 +211,10 @@ func Parse(conn net.Conn, timeouts ...time.Duration) (msgType byte, result inter
 	}
 	reader := bufio.NewReader(conn)
 	prefix := make([]byte, 1)
-	reader.Read(prefix)
+	_, err = reader.Read(prefix)
+	if err != nil {
+		return
+	}
 	result, err = parseReader(prefix, reader)
 	msgType = prefix[0]
 	return
@@ -247,8 +250,33 @@ func parseReader(prefix []byte, reader *bufio.Reader) (result interface{}, err e
 			if length == -1 {
 				result = ""
 			} else {
-				str, err = reader.ReadString('\n')
-				result = str[:len(str)-2]
+				var realLength = length + 2
+				var bulk []byte
+				if realLength > 64 {
+					bulk = make([]byte, 64)
+				} else {
+					bulk = make([]byte, realLength)
+				}
+				var jsonBuf bytes.Buffer
+				var n int
+				for {
+					var num int
+					num, err = reader.Read(bulk)
+					n += num
+					if err != nil {
+						break
+					}
+					jsonBuf.Write(bulk[:num])
+					if n >= realLength {
+						break
+					}
+				}
+				res := jsonBuf.Bytes()
+				if len(res) > 1 {
+					result = string(res[:len(res)-2])
+				} else {
+					result = ""
+				}
 			}
 		}
 	case TypeArrays: // * arrayPrefix
