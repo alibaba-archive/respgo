@@ -1,6 +1,7 @@
 package respgo_test
 
 import (
+	"bytes"
 	"net"
 	"testing"
 
@@ -20,6 +21,7 @@ var (
 	respInteger     = 1000
 	respIntegerText = ":1000\r\n"
 
+	respNullText       = "$-1\r\n"
 	respBulkString     = "foobar"
 	respBulkStringText = "$6\r\nfoobar\r\n"
 
@@ -102,21 +104,45 @@ func TestRespGo(t *testing.T) {
 
 		str := respgo.EncodeString(respSimpleString)
 		assert.Equal(respSimpleStringText, string(str))
+		dstr, _ := respgo.DecodeToString(str)
+		assert.Equal(respSimpleString, dstr)
 
 		str = respgo.EncodeError(respError)
 		assert.Equal(respErrorText, string(str))
+		dstr, _ = respgo.DecodeToString(str)
+		assert.Equal(respError, dstr)
 
 		str = respgo.EncodeInt(respInteger)
 		assert.Equal(respIntegerText, string(str))
+		dint, _ := respgo.DecodeToInt(str)
+		assert.Equal(respInteger, dint)
 
 		str = respgo.EncodeBulkString(respBulkString)
 		assert.Equal(respBulkStringText, string(str))
+		dstr, _ = respgo.DecodeToString(str)
+		assert.Equal(respBulkString, dstr)
 
 		foo := respgo.EncodeBulkString("foo")
 		bar := respgo.EncodeBulkString("bar")
 
 		str = respgo.EncodeArray([][]byte{foo, bar})
 		assert.Equal(respArrayText, string(str))
+		darr, _ := respgo.DecodeToArray(str)
+		assert.Equal([]interface{}{"foo", "bar"}, darr)
+
+		str = respgo.EncodeNull()
+		assert.Equal(respNullText, string(str))
+
+		str = respgo.EncodeNullArray()
+		assert.Equal(respArrayNullArray, string(str))
+
+		var buf bytes.Buffer
+		buf.WriteString("adjalk你")
+		str = respgo.EncodeBulkBuffer(buf.Bytes())
+		msgtype, dbuffer, _ := respgo.Decode(str)
+		assert.Equal(respgo.TypeBulkStrings, msgtype)
+		assert.Equal(buf.Bytes(), []byte(dbuffer.(string)))
+
 	})
 	t.Run("respgo with error message that should be", func(t *testing.T) {
 
@@ -369,7 +395,7 @@ func TestPartPacket(t *testing.T) {
 	assert := assert.New(t)
 
 	go func() {
-		conn, err := net.Dial("tcp", ":3000")
+		conn, err := net.Dial("tcp", ":3001")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -377,12 +403,13 @@ func TestPartPacket(t *testing.T) {
 
 		conn.Write([]byte("$6\r\nfo"))
 		conn.Write([]byte("obar\r\n"))
+		time.Sleep(time.Millisecond * 10)
 		conn.Write([]byte("$66\r\n012345678901234567890123456789012345678901234567890123456789"))
-		conn.Write([]byte("obara\r\n"))
+		conn.Write([]byte("obaraa\r\n"))
 
 	}()
 
-	l, err := net.Listen("tcp", ":3000")
+	l, err := net.Listen("tcp", ":3001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,17 +420,76 @@ func TestPartPacket(t *testing.T) {
 		return
 	}
 	defer conn.Close()
-	for index := 0; index < 2; index++ {
-		msgtype, result, _ := respgo.Parse(conn, time.Minute)
-		switch msgtype {
-		case respgo.TypeBulkStrings:
-			str := result.(string)
-			assert.Nil(err)
-			if len(str) > 10 {
-				assert.Equal("012345678901234567890123456789012345678901234567890123456789obara", result.(string))
-			} else {
-				assert.Equal(respBulkString, result.(string))
-			}
+
+	msgtype, result, err := respgo.Parse(conn, time.Minute)
+	assert.Equal(respgo.TypeBulkStrings, msgtype)
+	assert.Equal("foobar", result)
+	assert.Nil(err)
+
+	msgtype, result, err = respgo.Parse(conn, time.Minute)
+	assert.Equal(respgo.TypeBulkStrings, msgtype)
+	assert.Equal("012345678901234567890123456789012345678901234567890123456789obaraa", result)
+	assert.Nil(err)
+
+}
+
+func TestParseError(t *testing.T) {
+	assert := assert.New(t)
+	go func() {
+		conn, err := net.Dial("tcp", ":3002")
+		if err != nil {
+			t.Fatal(err)
 		}
+		defer conn.Close()
+		conn.Write([]byte("$"))
+
+	}()
+
+	l, err := net.Listen("tcp", ":3002")
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer l.Close()
+
+	conn, err := l.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	msgtype, result, err := respgo.Parse(conn, time.Minute)
+	assert.Equal(respgo.TypeBulkStrings, msgtype)
+	assert.Contains(err.Error(), "EOF")
+	assert.Equal("", result)
+
+}
+func TestParseEOF(t *testing.T) {
+	assert := assert.New(t)
+	go func() {
+		conn, err := net.Dial("tcp", ":3002")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		conn.Write([]byte("$32\r\n"))
+
+	}()
+
+	l, err := net.Listen("tcp", ":3002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	conn, err := l.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	msgtype, result, err := respgo.Parse(conn, time.Minute)
+	assert.Equal(respgo.TypeBulkStrings, msgtype)
+	assert.Contains(err.Error(), "EOF")
+	assert.Equal("", result)
+
 }

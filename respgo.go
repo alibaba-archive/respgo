@@ -11,15 +11,15 @@ import (
 
 var (
 	// TypeSimpleStrings For Simple Strings the first byte of the reply is "+"
-	TypeSimpleStrings byte = '+'
+	TypeSimpleStrings = "+"
 	// TypeErrors For Errors the first byte of the reply is "-"
-	TypeErrors byte = '-'
+	TypeErrors = "-"
 	//TypeIntegers For Integers the first byte of the reply is ":"
-	TypeIntegers byte = ':'
+	TypeIntegers = ":"
 	// TypeBulkStrings For Bulk Strings the first byte of the reply is "$"
-	TypeBulkStrings byte = '$'
+	TypeBulkStrings = "$"
 	// TypeArrays For Arrays the first byte of the reply is "*"
-	TypeArrays byte = '*'
+	TypeArrays = "*"
 )
 
 var (
@@ -28,25 +28,25 @@ var (
 	//PONG ...
 	PONG = EncodeString("PONG")
 	// CRLF is "\r\n"
-	CRLF = []byte{'\r', '\n'}
+	CRLF = "\r\n"
 )
 
-func checkType(resp byte) (result byte) {
-	result = resp
+func checkType(resp byte) (result string) {
+	result = string(resp)
 	if result == TypeSimpleStrings || result == TypeErrors || result == TypeIntegers || result == TypeBulkStrings || result == TypeArrays {
 		return
 	}
-	return '0'
+	return ""
 }
 
 // Decode ...
-func Decode(resp []byte) (msgType byte, result interface{}, err error) {
+func Decode(resp []byte) (msgType string, result interface{}, err error) {
 	err = checkError(resp)
 	if err != nil {
 		return
 	}
 	_, result, err = parseBuffer(resp)
-	msgType = resp[0]
+	msgType = string(resp[0])
 	return
 }
 
@@ -89,50 +89,59 @@ func DecodeToArray(resp []byte) (result []interface{}, err error) {
 	return
 }
 
+func newBuf(data string) []byte {
+	var buf bytes.Buffer
+	buf.WriteString(data)
+	return buf.Bytes()
+}
+
+//EncodeNull return RESP's Null value to RESP buffer.
+// $-1\r\n
+func EncodeNull() []byte {
+	return newBuf(TypeBulkStrings + "-1" + CRLF)
+}
+
+// EncodeNullArray ...
+func EncodeNullArray() []byte {
+	return newBuf(TypeArrays + "-1" + CRLF)
+}
+
 // EncodeString returns a simple string with the given contents.
 func EncodeString(s string) []byte {
-	var buf bytes.Buffer
-	buf.WriteByte(TypeSimpleStrings)
-	buf.WriteString(s)
-	buf.Write(CRLF)
-	return buf.Bytes()
+	return newBuf(TypeSimpleStrings + s + CRLF)
 }
 
 // EncodeError ...
 func EncodeError(s string) []byte {
-	var buf bytes.Buffer
-	buf.WriteByte(TypeErrors)
-	buf.WriteString(s)
-	buf.Write(CRLF)
-	return buf.Bytes()
+	return newBuf(TypeErrors + s + CRLF)
 }
 
 // EncodeBulkString a bulk string with the given contents.
 func EncodeBulkString(s string) []byte {
-	var buf bytes.Buffer
-	buf.WriteByte(TypeBulkStrings)
-	buf.WriteString(strconv.Itoa(len(s)))
-	buf.Write(CRLF)
-	buf.WriteString(s)
-	buf.Write(CRLF)
-	return buf.Bytes()
+	return newBuf(TypeBulkStrings + strconv.Itoa(len(s)) + CRLF + s + CRLF)
 }
 
 // EncodeInt ....
 func EncodeInt(s int) []byte {
+	return newBuf(TypeIntegers + strconv.Itoa(s) + CRLF)
+}
+
+// EncodeBulkBuffer ...
+func EncodeBulkBuffer(s []byte) []byte {
 	var buf bytes.Buffer
-	buf.WriteByte(TypeIntegers)
-	buf.WriteString(strconv.Itoa(s))
-	buf.Write(CRLF)
+	buf.WriteString(TypeBulkStrings)
+	buf.WriteString(strconv.Itoa(len(s)))
+	buf.WriteString(CRLF)
+	buf.Write(s)
 	return buf.Bytes()
 }
 
 // EncodeArray ...
 func EncodeArray(s [][]byte) []byte {
 	var buf bytes.Buffer
-	buf.WriteByte(TypeArrays)
+	buf.WriteString(TypeArrays)
 	buf.WriteString(strconv.Itoa(len(s)))
-	buf.Write(CRLF)
+	buf.WriteString(CRLF)
 	for _, val := range s {
 		buf.Write(val)
 	}
@@ -151,7 +160,7 @@ func readLine(resp []byte) (c []byte, foward int) {
 func checkError(resp []byte) (err error) {
 	if len(resp) < 4 {
 		err = errors.New("invalid resp length that shoud be >4")
-	} else if checkType(resp[0]) == '0' {
+	} else if checkType(resp[0]) == "" {
 		err = errors.New("invalid resp type")
 	}
 	return
@@ -159,7 +168,7 @@ func checkError(resp []byte) (err error) {
 
 func parseBuffer(resp []byte) (foward int, result interface{}, err error) {
 	var line []byte
-	switch resp[0] {
+	switch string(resp[0]) {
 	case TypeSimpleStrings: // +  Simple string Prefix
 		line, foward = readLine(resp)
 		result = string(line)
@@ -204,7 +213,7 @@ func parseBuffer(resp []byte) (foward int, result interface{}, err error) {
 }
 
 // Parse ...
-func Parse(conn net.Conn, timeouts ...time.Duration) (msgType byte, result interface{}, err error) {
+func Parse(conn net.Conn, timeouts ...time.Duration) (msgType string, result interface{}, err error) {
 	if len(timeouts) > 0 {
 		conn.SetReadDeadline(time.Now().Add(timeouts[0]))
 		defer conn.SetReadDeadline(time.Time{})
@@ -216,7 +225,7 @@ func Parse(conn net.Conn, timeouts ...time.Duration) (msgType byte, result inter
 		return
 	}
 	result, err = parseReader(prefix, reader)
-	msgType = prefix[0]
+	msgType = string(prefix[0])
 	return
 }
 
@@ -226,7 +235,7 @@ func parseReader(prefix []byte, reader *bufio.Reader) (result interface{}, err e
 		reader.Read(prefix)
 	}
 	var str string
-	switch prefix[0] {
+	switch string(prefix[0]) {
 	case TypeSimpleStrings: // +  Simple string Prefix
 		str, err = reader.ReadString('\n')
 		if err == nil {
@@ -247,9 +256,7 @@ func parseReader(prefix []byte, reader *bufio.Reader) (result interface{}, err e
 		if err == nil {
 			var length int
 			length, err = strconv.Atoi(str[:len(str)-2])
-			if length == -1 {
-				result = ""
-			} else {
+			if length != -1 && err == nil {
 				var realLength = length + 2
 				var bulk []byte
 				if realLength > 64 {
@@ -274,10 +281,11 @@ func parseReader(prefix []byte, reader *bufio.Reader) (result interface{}, err e
 				res := jsonBuf.Bytes()
 				if len(res) > 1 {
 					result = string(res[:len(res)-2])
-				} else {
-					result = ""
 				}
 			}
+		}
+		if result == nil {
+			result = ""
 		}
 	case TypeArrays: // * arrayPrefix
 		str, err = reader.ReadString('\n')
