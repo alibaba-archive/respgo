@@ -10,55 +10,54 @@ import (
 
 // Data type
 const (
-	TypeSimpleStrings = "+"
-	TypeErrors        = "-"
-	TypeIntegers      = ":"
-	TypeBulkStrings   = "$"
-	TypeArrays        = "*"
+	typeSimpleStrings = "+"
+	typeErrors        = "-"
+	typeIntegers      = ":"
+	typeBulkStrings   = "$"
+	typeArrays        = "*"
 )
 
 const (
-	// CRLF ...
-	CRLF = "\r\n"
+	crlf = "\r\n"
 )
 
 // EncodeString encodes a simple string
 func EncodeString(s string) []byte {
-	return []byte(TypeSimpleStrings + s + CRLF)
+	return []byte(typeSimpleStrings + s + crlf)
 }
 
 // EncodeError encodes a error string
 func EncodeError(s string) []byte {
-	return []byte(TypeErrors + s + CRLF)
+	return []byte(typeErrors + s + crlf)
 }
 
 // EncodeInt encodes an int
 func EncodeInt(s int64) []byte {
-	return []byte(TypeIntegers + strconv.FormatInt(s, 10) + CRLF)
+	return []byte(typeIntegers + strconv.FormatInt(s, 10) + crlf)
 }
 
 // EncodeBulkString encodes a bulk string
 func EncodeBulkString(s string) []byte {
-	return []byte(TypeBulkStrings + strconv.Itoa(len(s)) + CRLF + s + CRLF)
+	return []byte(typeBulkStrings + strconv.Itoa(len(s)) + crlf + s + crlf)
 }
 
 //EncodeNull encodes null value
 func EncodeNull() []byte {
-	return []byte(TypeBulkStrings + "-1" + CRLF)
+	return []byte(typeBulkStrings + "-1" + crlf)
 }
 
 // EncodeNullArray encodes null array
 func EncodeNullArray() []byte {
-	return []byte(TypeArrays + "-1" + CRLF)
+	return []byte(typeArrays + "-1" + crlf)
 }
 
 // EncodeArray encode a slice of byte slice. It accepts the results of other encode method including itself.
 // For example: EncodeArray([][]byte{EncodeInt(1), EncodeNull()})
 func EncodeArray(s [][]byte) []byte {
 	var buf bytes.Buffer
-	buf.WriteString(TypeArrays)
+	buf.WriteString(typeArrays)
 	buf.WriteString(strconv.Itoa(len(s)))
-	buf.WriteString(CRLF)
+	buf.WriteString(crlf)
 	for _, val := range s {
 		buf.Write(val)
 	}
@@ -77,13 +76,13 @@ func Decode(reader *bufio.Reader) (result interface{}, err error) {
 	}
 	msgType, line := string(line[0]), line[1:len(line)-2]
 	switch msgType {
-	case TypeSimpleStrings:
+	case typeSimpleStrings:
 		result = line
-	case TypeErrors:
+	case typeErrors:
 		result = errors.New(line)
-	case TypeIntegers:
+	case typeIntegers:
 		result, err = strconv.ParseInt(line, 10, 64)
-	case TypeBulkStrings:
+	case typeBulkStrings:
 		var length int
 		length, err = strconv.Atoi(line)
 		if err != nil {
@@ -98,7 +97,7 @@ func Decode(reader *bufio.Reader) (result interface{}, err error) {
 			return
 		}
 		result = string(buff[:length])
-	case TypeArrays:
+	case typeArrays:
 		var length int
 		length, err = strconv.Atoi(line)
 		if length == -1 {
