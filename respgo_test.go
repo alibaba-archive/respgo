@@ -1,495 +1,187 @@
 package respgo_test
 
 import (
-	"bytes"
-	"net"
+	"bufio"
+	"errors"
+	"strings"
 	"testing"
 
-	"time"
-
-	"github.com/stretchr/testify/assert"
 	"github.com/teambition/respgo"
 )
 
-var (
-	respSimpleString     = "OK"
-	respSimpleStringText = "+OK\r\n"
+func TestEncode(t *testing.T) {
+	cases := []struct {
+		value []byte
+		want  string
+	}{
+		{respgo.EncodeString("OK"), "+OK\r\n"},
+		{respgo.EncodeString("中文"), "+中文\r\n"},
+		{respgo.EncodeString(""), "+\r\n"},
 
-	respError     = "Error message"
-	respErrorText = "-Error message\r\n"
+		{respgo.EncodeError("Error message"), "-Error message\r\n"},
 
-	respInteger     = 1000
-	respIntegerText = ":1000\r\n"
+		{respgo.EncodeInt(1000), ":1000\r\n"},
+		{respgo.EncodeInt(1456061893587000000), ":1456061893587000000\r\n"},
+		{respgo.EncodeInt(-1), ":-1\r\n"},
 
-	respNullText       = "$-1\r\n"
-	respBulkString     = "foobar"
-	respBulkStringText = "$6\r\nfoobar\r\n"
+		{respgo.EncodeBulkString("foobar"), "$6\r\nfoobar\r\n"},
+		{respgo.EncodeBulkString("中文"), "$6\r\n中文\r\n"},
+		{respgo.EncodeBulkString(""), "$0\r\n\r\n"},
+		{respgo.EncodeNull(), "$-1\r\n"},
 
-	respArrayText = "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"
+		{respgo.EncodeArray([][]byte{
+			respgo.EncodeBulkString("foo"),
+			respgo.EncodeBulkString("bar"),
+		}), "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"},
 
-	respArrayComplexText = "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-Bar\r\n"
+		{respgo.EncodeArray([][]byte{
+			respgo.EncodeInt(1),
+			respgo.EncodeInt(2),
+			respgo.EncodeInt(3),
+		}), "*3\r\n:1\r\n:2\r\n:3\r\n"},
 
-	respArrayNullElementsText = "*3\r\n$3\r\nfoo\r\n$-1\r\n$3\r\nbar\r\n"
-	respArrayEmptyArray       = "*0\r\n"
-	respArrayNullArray        = "*-1\r\n"
+		{respgo.EncodeArray([][]byte{
+			respgo.EncodeInt(1),
+			respgo.EncodeInt(2),
+			respgo.EncodeInt(3),
+			respgo.EncodeInt(4),
+			respgo.EncodeBulkString("foobar"),
+		}), "*5\r\n:1\r\n:2\r\n:3\r\n:4\r\n$6\r\nfoobar\r\n"},
 
-	respErrorArrayText = "*2\r\n$3\r\nfoo\r\n:xxx\r\n"
-)
+		{respgo.EncodeArray([][]byte{
+			respgo.EncodeArray([][]byte{
+				respgo.EncodeInt(1),
+				respgo.EncodeInt(2),
+				respgo.EncodeInt(3),
+			}),
+			respgo.EncodeArray([][]byte{
+				respgo.EncodeString("Foo"),
+				respgo.EncodeError("Bar"),
+			}),
+		}), "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-Bar\r\n"},
 
-func TestRespGo(t *testing.T) {
-	// Simple "OK" string
-	assert := assert.New(t)
-	t.Run("respgo with Decode func that should be", func(t *testing.T) {
+		{respgo.EncodeArray([][]byte{
+			respgo.EncodeBulkString("foo"),
+			respgo.EncodeNull(),
+			respgo.EncodeBulkString("bar"),
+		}), "*3\r\n$3\r\nfoo\r\n$-1\r\n$3\r\nbar\r\n"},
 
-		msgtype, result, err := respgo.Decode([]byte(respErrorText))
-		assert.Equal(msgtype, respgo.TypeErrors)
-		assert.Nil(err)
-		assert.Equal(respError, result.(string))
+		{respgo.EncodeArray([][]byte{}), "*0\r\n"},
 
-		str, err := respgo.DecodeToString([]byte(respSimpleStringText))
-		assert.Nil(err)
-		assert.Equal(respSimpleString, str)
-
-		num, err := respgo.DecodeToInt([]byte(respIntegerText))
-		assert.Nil(err)
-		assert.Equal(respInteger, num)
-
-		result, err = respgo.DecodeToString([]byte(respBulkStringText))
-		assert.Nil(err)
-		assert.Equal(respBulkString, result)
-
-		arr, err := respgo.DecodeToArray([]byte(respArrayText))
-		assert.Nil(err)
-		assert.Equal(2, len(arr))
-
-		arr, err = respgo.DecodeToArray([]byte(respArrayComplexText))
-		assert.Nil(err)
-		assert.Equal(2, len(arr))
-		if assert.NotNil(arr[0]) {
-			arr1 := arr[0].([]interface{})
-			assert.Equal(3, len(arr1))
-			assert.Equal(1, arr1[0].(int))
-			assert.Equal(2, arr1[1].(int))
-			assert.Equal(3, arr1[2].(int))
-		}
-		if assert.NotNil(arr[1]) {
-			arr2 := arr[1].([]interface{})
-			assert.Equal(2, len(arr2))
-			assert.Equal("Foo", arr2[0].(string))
-			assert.Equal("Bar", arr2[1].(string))
-		}
-	})
-	t.Run("respgo with Null elements in Arrays or empty Array func that should be", func(t *testing.T) {
-		arr, err := respgo.DecodeToArray([]byte(respArrayNullElementsText))
-		assert.Nil(err)
-		if assert.NotNil(arr) {
-			assert.Equal(3, len(arr))
-			assert.Equal("foo", arr[0].(string))
-			assert.Equal("", arr[1].(string))
-			assert.Equal("bar", arr[2].(string))
-		}
-
-		arr, err = respgo.DecodeToArray([]byte(respArrayEmptyArray))
-		assert.Nil(err)
-		if assert.NotNil(arr) {
-			assert.Equal(0, len(arr))
-		}
-
-		arr, err = respgo.DecodeToArray([]byte(respArrayNullArray))
-		assert.NotNil(err)
-		assert.Nil(arr)
-	})
-
-	t.Run("respgo with Encode func that should be", func(t *testing.T) {
-
-		str := respgo.EncodeString(respSimpleString)
-		assert.Equal(respSimpleStringText, string(str))
-		dstr, _ := respgo.DecodeToString(str)
-		assert.Equal(respSimpleString, dstr)
-
-		str = respgo.EncodeError(respError)
-		assert.Equal(respErrorText, string(str))
-		dstr, _ = respgo.DecodeToString(str)
-		assert.Equal(respError, dstr)
-
-		str = respgo.EncodeInt(respInteger)
-		assert.Equal(respIntegerText, string(str))
-		dint, _ := respgo.DecodeToInt(str)
-		assert.Equal(respInteger, dint)
-
-		str = respgo.EncodeBulkString(respBulkString)
-		assert.Equal(respBulkStringText, string(str))
-		dstr, _ = respgo.DecodeToString(str)
-		assert.Equal(respBulkString, dstr)
-
-		foo := respgo.EncodeBulkString("foo")
-		bar := respgo.EncodeBulkString("bar")
-
-		str = respgo.EncodeArray([][]byte{foo, bar})
-		assert.Equal(respArrayText, string(str))
-		darr, _ := respgo.DecodeToArray(str)
-		assert.Equal([]interface{}{"foo", "bar"}, darr)
-
-		str = respgo.EncodeNull()
-		assert.Equal(respNullText, string(str))
-
-		str = respgo.EncodeNullArray()
-		assert.Equal(respArrayNullArray, string(str))
-
-		var buf bytes.Buffer
-		buf.WriteString("adjalk你")
-		str = respgo.EncodeBulkBuffer(buf.Bytes())
-		msgtype, dbuffer, _ := respgo.Decode(str)
-		assert.Equal(respgo.TypeBulkStrings, msgtype)
-		assert.Equal(buf.Bytes(), []byte(dbuffer.(string)))
-
-	})
-	t.Run("respgo with error message that should be", func(t *testing.T) {
-
-		_, result, err := respgo.Decode([]byte(""))
-		assert.Nil(result)
-		if assert.NotNil(err) {
-			assert.Equal("invalid resp length that shoud be >4", err.Error())
-		}
-
-		_, result, err = respgo.Decode([]byte("^dxx\r\n"))
-		assert.Nil(result)
-		if assert.NotNil(err) {
-			assert.Equal("invalid resp type", err.Error())
-		}
-
-		result, err = respgo.DecodeToString([]byte(respIntegerText))
-		assert.Empty(result)
-		if assert.NotNil(err) {
-			assert.Equal("invalid string or bulkstring type", err.Error())
-		}
-
-		result, err = respgo.DecodeToString([]byte(""))
-		assert.Empty(result)
-		if assert.NotNil(err) {
-			assert.Equal("invalid resp length that shoud be >4", err.Error())
-		}
-
-		num, err := respgo.DecodeToInt([]byte(respArrayText))
-		assert.Equal(0, num)
-		if assert.NotNil(err) {
-			assert.Equal("invalid int type", err.Error())
-		}
-		num, err = respgo.DecodeToInt([]byte(""))
-		assert.Equal(0, num)
-		if assert.NotNil(err) {
-			assert.Equal("invalid resp length that shoud be >4", err.Error())
-		}
-
-		array, err := respgo.DecodeToArray([]byte(""))
-		assert.Equal(0, len(array))
-		if assert.NotNil(err) {
-			assert.Equal("invalid resp length that shoud be >4", err.Error())
-		}
-
-		array, err = respgo.DecodeToArray([]byte("xxxxxxxxxxxxxxxxx"))
-		assert.Equal(0, len(array))
-		if assert.NotNil(err) {
-			assert.Equal("invalid resp type", err.Error())
-		}
-		array, err = respgo.DecodeToArray([]byte(respIntegerText))
-		assert.Equal(0, len(array))
-		if assert.NotNil(err) {
-			assert.Equal("invalid array type", err.Error())
-		}
-
-		array, err = respgo.DecodeToArray([]byte(respErrorArrayText))
-		assert.Equal(0, len(array))
-		if assert.NotNil(err) {
-			assert.Contains(err.Error(), "invalid syntax")
-		}
-	})
-}
-func TestParse(t *testing.T) {
-	assert := assert.New(t)
-	go func() {
-		conn, err := net.Dial("tcp", ":3000")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer conn.Close()
-		conn.Write([]byte(respErrorText))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respSimpleStringText))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respIntegerText))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respBulkStringText))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respArrayText))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respArrayComplexText))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respArrayEmptyArray))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respArrayNullArray))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respArrayNullElementsText))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte("xxxxxxxxxxx"))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respErrorArrayText))
-		time.Sleep(10 * time.Millisecond)
-		conn.Write([]byte(respErrorArrayText))
-
-	}()
-
-	l, err := net.Listen("tcp", ":3000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-
-	conn, err := l.Accept()
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	_, result, err := respgo.Parse(conn, time.Minute)
-	assert.Nil(err)
-	assert.Equal(respError, result.(string))
-
-	_, result, err = respgo.Parse(conn)
-	assert.Nil(err)
-	assert.Equal(respSimpleString, result)
-
-	_, result, err = respgo.Parse(conn, time.Minute)
-	assert.Nil(err)
-	assert.Equal(respInteger, result)
-
-	_, result, err = respgo.Parse(conn, time.Minute)
-	assert.Nil(err)
-	assert.Equal(respBulkString, result)
-
-	_, result, err = respgo.Parse(conn)
-	assert.Nil(err)
-	assert.Equal(2, len(result.([]interface{})))
-
-	_, result, err = respgo.Parse(conn, time.Minute)
-	arr := result.([]interface{})
-	assert.Nil(err)
-	assert.Equal(2, len(arr))
-	if assert.NotNil(arr[0]) {
-		arr1 := arr[0].([]interface{})
-		assert.Equal(3, len(arr1))
-		assert.Equal(1, arr1[0].(int))
-		assert.Equal(2, arr1[1].(int))
-		assert.Equal(3, arr1[2].(int))
-	}
-	if assert.NotNil(arr[1]) {
-		arr2 := arr[1].([]interface{})
-		assert.Equal(2, len(arr2))
-		assert.Equal("Foo", arr2[0].(string))
-		assert.Equal("Bar", arr2[1].(string))
-	}
-	_, result, err = respgo.Parse(conn, time.Minute)
-	assert.Nil(err)
-	if assert.NotNil(arr) {
-		assert.Equal(0, len(result.([]interface{})))
-	}
-	_, result, err = respgo.Parse(conn, time.Minute)
-	assert.NotNil(err)
-	assert.Nil(result)
-	_, result, err = respgo.Parse(conn, time.Minute)
-	arr = result.([]interface{})
-	assert.Nil(err)
-	if assert.NotNil(arr) {
-		assert.Equal(3, len(arr))
-		assert.Equal("foo", arr[0].(string))
-		assert.Equal("", arr[1].(string))
-		assert.Equal("bar", arr[2].(string))
+		{respgo.EncodeNullArray(), "*-1\r\n"},
 	}
 
-	_, result, err = respgo.Parse(conn, time.Minute)
-	if assert.NotNil(err) {
-		assert.Equal("invalid resp type", err.Error())
-	}
-	_, result, err = respgo.Parse(conn, time.Minute)
-	arr = result.([]interface{})
-	assert.Equal(2, len(arr))
-	if assert.NotNil(err) {
-		assert.Contains(err.Error(), "invalid syntax")
-	}
-
-	_, result, err = respgo.Parse(conn, time.Duration(0))
-	arr, _ = result.([]interface{})
-	assert.Equal(0, len(arr))
-	if assert.NotNil(err) {
-		assert.Contains(err.Error(), "i/o timeout")
+	for _, item := range cases {
+		if string(item.value) != item.want {
+			t.Errorf("Encode get: %q ,want: %q", item.value, item.want)
+		}
 	}
 }
-func TestParseConcurrent(t *testing.T) {
-	assert := assert.New(t)
-	go func() {
-		conn, err := net.Dial("tcp", ":3000")
-		if err != nil {
-			t.Fatal(err)
+
+func equal(v1 interface{}, v2 interface{}) bool {
+	switch v1 := v1.(type) {
+	case error:
+		v2, ok := v2.(error)
+		if !ok {
+			return false
 		}
-		defer conn.Close()
-		conn.Write([]byte(respErrorText))
-		conn.Write([]byte(respSimpleStringText))
-		conn.Write([]byte(respIntegerText))
-		conn.Write([]byte(respBulkStringText))
-		conn.Write([]byte(respArrayComplexText))
-
-		conn.Write([]byte("$6\r\nfo"))
-		conn.Write([]byte("obar\r\n"))
-	}()
-
-	l, err := net.Listen("tcp", ":3000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-
-	conn, err := l.Accept()
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	for index := 0; index < 5; index++ {
-
-		msgtype, result, err := respgo.Parse(conn, time.Minute)
-		switch msgtype {
-		case respgo.TypeErrors:
-			assert.Nil(err)
-			assert.Equal(respError, result.(string))
-		case respgo.TypeSimpleStrings:
-			assert.Nil(err)
-			assert.Equal(respSimpleString, result.(string))
-		case respgo.TypeIntegers:
-			assert.Nil(err)
-			assert.Equal(respInteger, result.(int))
-		case respgo.TypeBulkStrings:
-			assert.Nil(err)
-			assert.Equal(respBulkString, result.(string))
-		case respgo.TypeArrays:
-			arr := result.([]interface{})
-			assert.Nil(err)
-			assert.Equal(2, len(arr))
-			if assert.NotNil(arr[0]) {
-				arr1 := arr[0].([]interface{})
-				assert.Equal(3, len(arr1))
-				assert.Equal(1, arr1[0].(int))
-				assert.Equal(2, arr1[1].(int))
-				assert.Equal(3, arr1[2].(int))
+		return v1.Error() == v2.Error()
+	case []interface{}:
+		v2, ok := v2.([]interface{})
+		if !ok || len(v1) != len(v2) {
+			return false
+		}
+		for i, _ := range v1 {
+			if !equal(v1[i], v2[i]) {
+				return false
 			}
-			if assert.NotNil(arr[1]) {
-				arr2 := arr[1].([]interface{})
-				assert.Equal(2, len(arr2))
-				assert.Equal("Foo", arr2[0].(string))
-				assert.Equal("Bar", arr2[1].(string))
-			}
+		}
+		return true
+	default:
+		return v1 == v2
+	}
+}
 
+func TestDecode(t *testing.T) {
+	cases := []struct {
+		value string
+		want  interface{}
+	}{
+		{"+OK\r\n", "OK"},
+		{"+中文\r\n", "中文"},
+		{"+\r\n", ""},
+
+		{"-Error message\r\n", errors.New("Error message")},
+
+		{":1000\r\n", int64(1000)},
+		{":1456061893587000000\r\n", int64(1456061893587000000)},
+		{":-1\r\n", int64(-1)},
+
+		{"$6\r\nfoobar\r\n", "foobar"},
+		{"$6\r\n中文\r\n", "中文"},
+		{"$0\r\n\r\n", ""},
+		{"$-1\r\n", nil},
+
+		{"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n",
+			[]interface{}{"foo", "bar"}},
+		{"*3\r\n:1\r\n:2\r\n:3\r\n",
+			[]interface{}{int64(1), int64(2), int64(3)}},
+		{"*5\r\n:1\r\n:2\r\n:3\r\n:4\r\n$6\r\nfoobar\r\n",
+			[]interface{}{int64(1), int64(2), int64(3), int64(4), "foobar"}},
+		{"*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-Bar\r\n",
+			[]interface{}{[]interface{}{int64(1), int64(2), int64(3)}, []interface{}{"Foo", errors.New("Bar")}}},
+		{"*3\r\n$3\r\nfoo\r\n$-1\r\n$3\r\nbar\r\n",
+			[]interface{}{"foo", nil, "bar"}},
+		{"*0\r\n", []interface{}{}},
+		{"*-1\r\n", nil},
+	}
+	// Single Decode
+	for _, item := range cases {
+		result, err := respgo.Decode(bufio.NewReader(strings.NewReader(item.value)))
+		if err != nil {
+			t.Errorf("case %q get error %v", item.value, err)
+			continue
+		}
+		if !equal(result, item.want) {
+			t.Errorf("case %q get %v want %v", item.value, result, item.want)
+		}
+	}
+	// Multiple Decode
+	multiCase := ""
+	for _, item := range cases {
+		multiCase += item.value
+	}
+	bufReader := bufio.NewReader(strings.NewReader(multiCase))
+	for i := 0; i < len(cases); i++ {
+		result, err := respgo.Decode(bufReader)
+		item := cases[i]
+		if err != nil {
+			t.Errorf("case %q get error %v", item.value, err)
+			continue
+		}
+		if !equal(result, item.want) {
+			t.Errorf("case %q get %v want %v", item.value, result, item.want)
 		}
 	}
 }
-func TestPartPacket(t *testing.T) {
-	assert := assert.New(t)
 
-	go func() {
-		conn, err := net.Dial("tcp", ":3001")
-		if err != nil {
-			t.Fatal(err)
+func TestDecodeError(t *testing.T) {
+	cases := [][2]string{
+		{"", "EOF"},
+		{"+\n", "line is too short: +\n"},
+		{"!0\r\n", "invalid type: !"},
+		{":x\r\n", "strconv.ParseInt: parsing \"x\": invalid syntax"},
+		{"$x\r\nfoobar\r\n", "strconv.Atoi: parsing \"x\": invalid syntax"},
+		{"$6\r\nfoo\r\n", "unexpected EOF"},
+		{"*x\r\n:1\r\n:2\r\n", "strconv.Atoi: parsing \"x\": invalid syntax"},
+		{"*2\r\n:1\r\n", "EOF"},
+	}
+	for _, item := range cases {
+		_, err := respgo.Decode(bufio.NewReader(strings.NewReader(item[0])))
+		if err == nil {
+			t.Errorf("respgo.Decode %q should return error", item[0], err)
+		} else if err.Error() != item[1] {
+			t.Errorf("respgo.Decode %q get: %q ,want: %q", item[0], err, item[1])
 		}
-		defer conn.Close()
-
-		conn.Write([]byte("$6\r\nfo"))
-		conn.Write([]byte("obar\r\n"))
-		time.Sleep(time.Millisecond * 10)
-		conn.Write([]byte("$66\r\n012345678901234567890123456789012345678901234567890123456789"))
-		conn.Write([]byte("obaraa\r\n"))
-
-	}()
-
-	l, err := net.Listen("tcp", ":3001")
-	if err != nil {
-		t.Fatal(err)
 	}
-	defer l.Close()
-
-	conn, err := l.Accept()
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	msgtype, result, err := respgo.Parse(conn, time.Minute)
-	assert.Equal(respgo.TypeBulkStrings, msgtype)
-	assert.Equal("foobar", result)
-	assert.Nil(err)
-
-	msgtype, result, err = respgo.Parse(conn, time.Minute)
-	assert.Equal(respgo.TypeBulkStrings, msgtype)
-	assert.Equal("012345678901234567890123456789012345678901234567890123456789obaraa", result)
-	assert.Nil(err)
-
-}
-
-func TestParseError(t *testing.T) {
-	assert := assert.New(t)
-	go func() {
-		conn, err := net.Dial("tcp", ":3002")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer conn.Close()
-		conn.Write([]byte("$"))
-
-	}()
-
-	l, err := net.Listen("tcp", ":3002")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-
-	conn, err := l.Accept()
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	msgtype, result, err := respgo.Parse(conn, time.Minute)
-	assert.Equal(respgo.TypeBulkStrings, msgtype)
-	assert.Contains(err.Error(), "EOF")
-	assert.Equal("", result)
-
-}
-func TestParseEOF(t *testing.T) {
-	assert := assert.New(t)
-	go func() {
-		conn, err := net.Dial("tcp", ":3002")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer conn.Close()
-		conn.Write([]byte("$32\r\n"))
-
-	}()
-
-	l, err := net.Listen("tcp", ":3002")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer l.Close()
-
-	conn, err := l.Accept()
-	if err != nil {
-		return
-	}
-	defer conn.Close()
-
-	msgtype, result, err := respgo.Parse(conn, time.Minute)
-	assert.Equal(respgo.TypeBulkStrings, msgtype)
-	assert.Contains(err.Error(), "EOF")
-	assert.Equal("", result)
-
 }
