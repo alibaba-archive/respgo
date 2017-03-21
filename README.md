@@ -1,5 +1,5 @@
 # respgo
-A Go implementation of REdis Serialization Protocol (RESP).
+A Go implementation of [REdis Serialization Protocol (RESP)](https://redis.io/topics/protocol).
 
 [![Build Status](https://travis-ci.org/teambition/respgo.svg?branch=master)](https://travis-ci.org/teambition/respgo)
 [![Coverage Status](http://img.shields.io/coveralls/teambition/respgo.svg?style=flat-square)](https://coveralls.io/r/teambition/respgo)
