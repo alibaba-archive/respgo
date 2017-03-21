@@ -1,11 +1,10 @@
 # respgo
-
+A Go implementation of [REdis Serialization Protocol (RESP)](https://redis.io/topics/protocol).
 
 [![Build Status](https://travis-ci.org/teambition/respgo.svg?branch=master)](https://travis-ci.org/teambition/respgo)
 [![Coverage Status](http://img.shields.io/coveralls/teambition/respgo.svg?style=flat-square)](https://coveralls.io/r/teambition/respgo)
 [![License](http://img.shields.io/badge/license-mit-blue.svg?style=flat-square)](https://raw.githubusercontent.com/teambition/respgo/master/LICENSE)
 [![GoDoc](http://img.shields.io/badge/go-documentation-blue.svg?style=flat-square)](http://godoc.org/github.com/teambition/respgo)
-
 
 ## Installation
 ```go
@@ -13,39 +12,62 @@ go get github.com/teambition/respgo
 ```
 ## Examples
 ```go
-go run examples/main.go
-```
-## API
-### respgo.Decode
-Parse any resp bytes
-```go
-respError     = "Error message"
-respErrorText = "-Error message\r\n"
-result,_ := respgo.Decode([]byte(respErrorText))
+str := string(respgo.EncodeString("OK"))
+fmt.Println(str)
+// +OK\r\n
+reader := bufio.NewReader(strings.NewReader("+OK\r\n"))
+result, _ := respgo.Decode(reader)
+fmt.Println(result)
+// OK
 
-result == respError
-```
-### respgo.DecodeToString
-Parse Simple String or Bulk String text
-```go
-respSimpleStringText = "+OK\r\n"
-respSimpleString     = "OK"
-result,_ := respgo.DecodeToString([]byte(respSimpleStringText))
+str = string(respgo.EncodeError("Error message"))
+fmt.Println(str)
+// -Error message\r\n
+reader = bufio.NewReader(strings.NewReader("-Error message\r\n"))
+result, _ = respgo.Decode(reader)
+fmt.Println(result)
+// Error message
 
-result == respSimpleString
+str = string(respgo.EncodeInt(1000))
+fmt.Println(str)
+// :1000\r\n
+reader = bufio.NewReader(strings.NewReader(":1000\r\n"))
+result, _ = respgo.Decode(reader)
+fmt.Println(result)
+// 1000
 
-respBulkString     = "foobar"
-respBulkStringText = "$6\r\nfoobar\r\n"
-result,_ = respgo.DecodeToString([]byte(respBulkStringText))
+str = string(respgo.EncodeBulkString("foobar"))
+fmt.Println(str)
+// $6\r\nfoobar\r\n
+reader = bufio.NewReader(strings.NewReader("$6\r\nfoobar\r\n"))
+result, _ = respgo.Decode(reader)
+fmt.Println(result)
+// foobar
 
-result == respBulkString
-```
-### respgo.Parse
-Support timeout setting for Parse.
-```go
-conn, err := l.Accept()
-msgtype, result, err := respgo.Parse(conn, time.Minute)
-if msgtype==respgo.TypeSimpleStrings{
-    ///do something
-}
+str = string(respgo.EncodeNull())
+fmt.Println(str)
+// $-1\r\n
+reader = bufio.NewReader(strings.NewReader("$-1\r\n"))
+result, _ = respgo.Decode(reader)
+fmt.Println(result)
+// <nil>
+
+str = string(respgo.EncodeArray([][]byte{
+	respgo.EncodeBulkString("foo"),
+	respgo.EncodeBulkString("bar")}))
+fmt.Println(str)
+// *2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n
+reader = bufio.NewReader(strings.NewReader("*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"))
+result, _ = respgo.Decode(reader)
+fmt.Println(result)
+// [foo bar]
+
+str = string(respgo.EncodeNullArray())
+fmt.Println(str)
+// *-1\r\n
+reader = bufio.NewReader(strings.NewReader("*-1\r\n"))
+result, _ = respgo.Decode(reader)
+fmt.Println(result)
+// <nil>
+
 ```
