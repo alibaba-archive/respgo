@@ -78,6 +78,16 @@ func TestEncode(t *testing.T) {
 	}
 }
 
+func TestEncodePanic(t *testing.T) {
+	defer func() {
+		if r, want := recover(), "BulkString is over 512 MB"; r != want {
+			t.Errorf("Encode get: %v ,want: %v", r, want)
+		}
+	}()
+	b := make([]byte, 536870913)
+	respgo.EncodeBulkString(string(b))
+}
+
 func equal(v1 interface{}, v2 interface{}) bool {
 	switch v1 := v1.(type) {
 	case error:
@@ -172,6 +182,7 @@ func TestDecodeError(t *testing.T) {
 		{"!0\r\n", "invalid type: !"},
 		{":x\r\n", "strconv.ParseInt: parsing \"x\": invalid syntax"},
 		{"$x\r\nfoobar\r\n", "strconv.Atoi: parsing \"x\": invalid syntax"},
+		{"$536870913\r\nxx\r\n", "BulkString is over 512 MB"},
 		{"$6\r\nfoo\r\n", "unexpected EOF"},
 		{"*x\r\n:1\r\n:2\r\n", "strconv.Atoi: parsing \"x\": invalid syntax"},
 		{"*2\r\n:1\r\n", "EOF"},

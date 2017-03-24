@@ -18,7 +18,8 @@ const (
 )
 
 const (
-	crlf = "\r\n"
+	crlf                = "\r\n"
+	bulkStringMaxLength = 512 * 1024 * 1024
 )
 
 // EncodeString encodes a simple string
@@ -38,6 +39,9 @@ func EncodeInt(s int64) []byte {
 
 // EncodeBulkString encodes a bulk string
 func EncodeBulkString(s string) []byte {
+	if len(s) > bulkStringMaxLength {
+		panic("BulkString is over 512 MB")
+	}
 	return []byte(typeBulkStrings + strconv.Itoa(len(s)) + crlf + s + crlf)
 }
 
@@ -86,6 +90,10 @@ func Decode(reader *bufio.Reader) (result interface{}, err error) {
 		var length int
 		length, err = strconv.Atoi(line)
 		if err != nil {
+			return
+		}
+		if length > bulkStringMaxLength {
+			err = errors.New("BulkString is over 512 MB")
 			return
 		}
 		if length == -1 {
