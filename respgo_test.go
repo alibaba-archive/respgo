@@ -3,8 +3,11 @@ package respgo_test
 import (
 	"bufio"
 	"errors"
+	"io"
+	"math/rand"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/teambition/respgo"
 )
@@ -145,6 +148,7 @@ func TestDecode(t *testing.T) {
 		{"*0\r\n", []interface{}{}},
 		{"*-1\r\n", nil},
 	}
+
 	// Single Decode
 	for _, item := range cases {
 		result, err := respgo.Decode(bufio.NewReader(strings.NewReader(item.value)))
@@ -156,6 +160,7 @@ func TestDecode(t *testing.T) {
 			t.Errorf("case %q get %v want %v", item.value, result, item.want)
 		}
 	}
+
 	// Multiple Decode
 	multiCase := ""
 	for _, item := range cases {
@@ -173,6 +178,45 @@ func TestDecode(t *testing.T) {
 			t.Errorf("case %q get %v want %v", item.value, result, item.want)
 		}
 	}
+
+	// Chaos Decode
+	repeats := 10000
+	bufReader = bufio.NewReader(&FakeNetIO{buf: []byte(strings.Repeat(multiCase, repeats))})
+	for j := 0; j < repeats; j++ {
+		for i := 0; i < len(cases); i++ {
+			result, err := respgo.Decode(bufReader)
+			item := cases[i]
+			if err != nil {
+				t.Errorf("case %q get error %v", item.value, err)
+				continue
+			}
+			if !equal(result, item.want) {
+				t.Errorf("case %q get %v want %v", item.value, result, item.want)
+			}
+		}
+	}
+}
+
+type FakeNetIO struct {
+	offset int
+	buf    []byte
+}
+
+func (r *FakeNetIO) Read(p []byte) (n int, err error) {
+	if r.offset < len(r.buf) {
+		n = rand.Intn(len(p))
+		if n == 0 {
+			n = len(p)
+		}
+		if r.offset+n > len(r.buf) {
+			n = len(r.buf) - r.offset
+		}
+		time.Sleep(time.Duration(n) * time.Microsecond)
+		copy(p, r.buf[r.offset:r.offset+n])
+		r.offset += n
+		return n, nil
+	}
+	return 0, io.EOF
 }
 
 func TestDecodeError(t *testing.T) {
