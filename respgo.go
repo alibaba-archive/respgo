@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -78,11 +79,16 @@ func Decode(reader *bufio.Reader) (result interface{}, err error) {
 	if err != nil {
 		return
 	}
-	if len(line) < 3 {
-		err = errors.New("line is too short: " + line)
+	lineLen := len(line)
+	if lineLen < 3 {
+		err = fmt.Errorf(`line is too short: %#v`, line)
 		return
 	}
-	msgType, line := string(line[0]), line[1:len(line)-2]
+	if line[lineLen-2] != '\r' || line[lineLen-1] != '\n' {
+		err = fmt.Errorf("invalid CRLF: %#v", line)
+		return
+	}
+	msgType, line := string(line[0]), line[1:lineLen-2]
 	switch msgType {
 	case typeSimpleStrings:
 		result = line
@@ -96,16 +102,20 @@ func Decode(reader *bufio.Reader) (result interface{}, err error) {
 		if err != nil {
 			return
 		}
-		if length > bulkStringMaxLength {
-			err = errors.New("BulkString is over 512 MB")
+		if length == -1 {
 			return
 		}
-		if length == -1 {
+		if length > bulkStringMaxLength || length < -1 {
+			err = fmt.Errorf("invalid Bulk Strings length: %#v", length)
 			return
 		}
 		buff := make([]byte, length+2)
 		_, err = io.ReadFull(reader, buff)
 		if err != nil {
+			return
+		}
+		if buff[length] != '\r' || buff[length+1] != '\n' {
+			err = fmt.Errorf("invalid CRLF: %#v", buff)
 			return
 		}
 		result = string(buff[:length])
@@ -124,7 +134,7 @@ func Decode(reader *bufio.Reader) (result interface{}, err error) {
 		}
 		result = array
 	default:
-		err = errors.New("invalid type: " + msgType)
+		err = fmt.Errorf("invalid RESP type: %#v", msgType)
 	}
 	return
 }

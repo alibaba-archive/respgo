@@ -231,11 +231,12 @@ func (r *FakeNetIO) Read(p []byte) (n int, err error) {
 func TestDecodeError(t *testing.T) {
 	cases := [][2]string{
 		{"", "EOF"},
-		{"+\n", "line is too short: +\n"},
-		{"!0\r\n", "invalid type: !"},
+		{"+\n", `line is too short: "+\n"`},
+		{"!0\r\n", `invalid RESP type: "!"`},
 		{":x\r\n", "strconv.ParseInt: parsing \"x\": invalid syntax"},
 		{"$x\r\nfoobar\r\n", "strconv.Atoi: parsing \"x\": invalid syntax"},
-		{"$536870913\r\nxx\r\n", "BulkString is over 512 MB"},
+		{"$536870913\r\nxx\r\n", `invalid Bulk Strings length: 536870913`},
+		{"$-2\r\nxx\r\n", `invalid Bulk Strings length: -2`},
 		{"$6\r\nfoo\r\n", "unexpected EOF"},
 		{"*x\r\n:1\r\n:2\r\n", "strconv.Atoi: parsing \"x\": invalid syntax"},
 		{"*2\r\n:1\r\n", "EOF"},
