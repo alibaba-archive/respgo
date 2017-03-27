@@ -83,7 +83,7 @@ func TestEncode(t *testing.T) {
 
 func TestEncodeStringPanic(t *testing.T) {
 	defer func() {
-		if r, want := recover(), "SimpleString should not contain \\r\\n"; r != want {
+		if r, want := recover(), "SimpleString cannot contain a CR or LF character"; r != want {
 			t.Errorf("Encode get: %v ,want: %v", r, want)
 		}
 	}()
