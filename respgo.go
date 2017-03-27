@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"strings"
 )
 
 // Data type
@@ -24,6 +25,9 @@ const (
 
 // EncodeString encodes a simple string
 func EncodeString(s string) []byte {
+	if strings.ContainsAny(s, "\r\n") {
+		panic("SimpleString should not contain \\r\\n")
+	}
 	return []byte(typeSimpleStrings + s + crlf)
 }
 

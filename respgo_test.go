@@ -81,7 +81,16 @@ func TestEncode(t *testing.T) {
 	}
 }
 
-func TestEncodePanic(t *testing.T) {
+func TestEncodeStringPanic(t *testing.T) {
+	defer func() {
+		if r, want := recover(), "SimpleString should not contain \\r\\n"; r != want {
+			t.Errorf("Encode get: %v ,want: %v", r, want)
+		}
+	}()
+	respgo.EncodeString("Hello World\r")
+}
+
+func TestEncodeBulkStringPanic(t *testing.T) {
 	defer func() {
 		if r, want := recover(), "BulkString is over 512 MB"; r != want {
 			t.Errorf("Encode get: %v ,want: %v", r, want)
