@@ -115,7 +115,7 @@ func Decode(reader *bufio.Reader) (result interface{}, err error) {
 			return
 		}
 		if buff[length] != '\r' || buff[length+1] != '\n' {
-			err = fmt.Errorf("invalid CRLF: %#v", buff)
+			err = fmt.Errorf("invalid CRLF: %#v", string(buff))
 			return
 		}
 		result = string(buff[:length])
